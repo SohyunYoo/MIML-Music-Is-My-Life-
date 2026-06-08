@@ -13,7 +13,8 @@ class TagGenerationService(
     private val openAiClient: OpenAiClient,
     private val embeddingService: EmbeddingService,
     private val musicRepository: MusicRepository,
-    private val musicTagRepository: MusicTagRepository
+    private val musicTagRepository: MusicTagRepository,
+    private val musicAnalysisService: MusicAnalysisService
 ) {
     private val MAX_TAGS_PER_MUSIC = 30
 
@@ -67,7 +68,34 @@ class TagGenerationService(
 
         println("   생성된 태그: $tags")
 
-        val music = musicRepository.findBySpotifyId(request.spotifyId)
+        var music = musicRepository.findBySpotifyId(request.spotifyId)
+
+        // DB에 없으면 곡 정보 수집 후 신규 저장
+        if (music == null) {
+            if (!request.title.isNullOrBlank() && !request.artist.isNullOrBlank()) {
+                println("   🆕 DB에 없는 곡 — 신규 저장 시작 (spotifyId=${request.spotifyId})")
+                try {
+                    val result = musicAnalysisService.fetchAndSaveMusicBySpotifyId(
+                        spotifyId = request.spotifyId,
+                        title = request.title,
+                        artist = request.artist,
+                        album = request.album,
+                        albumImageUrl = request.albumImageUrl
+                    )
+                    music = result.music
+
+                    // AudioFeatures 기반 GPT 자동 태그 생성
+                    if (result.audioFeatures != null) {
+                        autoTagByFeatures(music.id!!, request.title, request.artist, result.audioFeatures)
+                    }
+                } catch (e: Exception) {
+                    println("   ⚠️ 신규 곡 저장 실패 (${request.spotifyId}): ${e.message} — 태그만 반환")
+                }
+            } else {
+                println("   ⚠️ spotifyId=${request.spotifyId} 곡을 DB에서 찾지 못했고 title/artist 미제공 — 태그 저장 생략")
+            }
+        }
+
         if (music != null) {
             val currentCount = musicTagRepository.countByMusicId(music.id!!)
             val remaining = MAX_TAGS_PER_MUSIC - currentCount
@@ -88,8 +116,6 @@ class TagGenerationService(
                     detectAndResolveConflicts(music.id!!, newTags.map { it.tag })
                 }
             }
-        } else {
-            println("   ⚠️ spotifyId=${request.spotifyId} 곡을 DB에서 찾지 못해 태그 저장 생략")
         }
 
         return TagGenerationResponse(tags = tags)

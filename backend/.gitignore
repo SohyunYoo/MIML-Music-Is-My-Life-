@@ -1,0 +1,26 @@
+.gradle
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+### Sensitive files ###
+src/main/resources/firebase-service-account.json
+src/main/resources/application-local.yaml
+src/main/resources/application-secret.yaml
+
+### Env ###
+.env
+*.env
+
+### OS ###
+.DS_Store

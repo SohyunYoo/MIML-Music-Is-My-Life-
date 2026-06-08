@@ -1,0 +1,49 @@
+### IntelliJ IDEA ###
+.idea/
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+### Kotlin ###
+.kotlin
+
+### Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+### VS Code ###
+.vscode/
+
+### Mac OS ###
+.DS_Store
+
+### Claude Code ###
+.claude/
+
+### Sensitive files ###
+firebase-service-account.json
+**/resources/firebase-service-account.json
+
+### Test & dev artifacts ###
+*.http
+*.sql
+*.iml
+
+### Env ###
+.env
+*.env

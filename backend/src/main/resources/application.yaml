@@ -1,0 +1,51 @@
+spring:
+  application:
+    name: miml-backend
+
+  datasource:
+    url: jdbc:mysql://${DB_HOST}:3306/miml?useSSL=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+    show-sql: true
+
+server:
+  port: 8080
+
+logging:
+  level:
+    org.hibernate.SQL: DEBUG
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+rapidapi:
+  key: ${RAPIDAPI_KEY}
+  host: track-analysis.p.rapidapi.com
+  base-url: https://track-analysis.p.rapidapi.com
+
+openai:
+  api-key: ${OPENAI_API_KEY}
+  model: gpt-4o-mini
+
+lastfm:
+  api-key: ${LASTFM_API_KEY}
+
+# Spotify API 설정
+spotify:
+  client-id: ${SPOTIFY_CLIENT_ID}
+  client-secret: ${SPOTIFY_CLIENT_SECRET}
+  redirect-uri: http://localhost:8080/auth/spotify/callback
+  auth-url: https://accounts.spotify.com/authorize
+  token-url: https://accounts.spotify.com/api/token
+  api-base-url: https://api.spotify.com/v1
+  scope: user-read-private user-read-email playlist-read-private user-library-read user-top-read

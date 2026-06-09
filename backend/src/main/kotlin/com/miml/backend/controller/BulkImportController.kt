@@ -145,6 +145,9 @@ class BulkImportController(
         val artistId = spotifyClient.searchArtistId(spotifyAccessToken, artist)
             ?: throw RuntimeException("Spotify에서 아티스트 '$artist'를 찾을 수 없습니다.")
 
+        // 장르 자동 저장
+        artistGenreService.saveGenresIfAbsent(artistId, artist)
+
         val spotifyTracks = spotifyClient.fetchArtistTopTracks(spotifyAccessToken, artistId)
 
         val tracks = spotifyTracks.take(limit).mapNotNull { track ->
@@ -183,6 +186,10 @@ class BulkImportController(
         artists.forEachIndexed { index, artist ->
             println("\n[${index + 1}/${artists.size}] 🎤 처리 중: $artist")
             try {
+                // 장르 자동 저장
+                val artistId = spotifyClient.searchArtistId(spotifyAccessToken, artist)
+                if (artistId != null) artistGenreService.saveGenresIfAbsent(artistId, artist)
+
                 val spotifyTracks = spotifyClient.searchTracksByArtist(spotifyAccessToken, artist, limitPerArtist)
 
                 if (spotifyTracks.isEmpty()) {

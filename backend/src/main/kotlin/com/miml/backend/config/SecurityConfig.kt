@@ -26,7 +26,7 @@ class SecurityConfig(
             }
             .authorizeHttpRequests { auth ->
                 auth
-                    .requestMatchers("/api/hello").permitAll()
+                    .requestMatchers("/api/hello", "/api/ping", "/api/music/count", "/api/music/export").permitAll()
                     .anyRequest().authenticated()
             }
             .exceptionHandling {

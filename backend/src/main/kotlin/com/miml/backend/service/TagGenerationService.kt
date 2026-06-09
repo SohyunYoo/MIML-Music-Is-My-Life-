@@ -1,6 +1,7 @@
 package com.miml.backend.service
 
 import com.miml.backend.client.OpenAiClient
+import com.miml.backend.client.SpotifyClient
 import com.miml.backend.dto.TagGenerationRequest
 import com.miml.backend.dto.TagGenerationResponse
 import com.miml.backend.entity.MusicTag
@@ -14,7 +15,8 @@ class TagGenerationService(
     private val embeddingService: EmbeddingService,
     private val musicRepository: MusicRepository,
     private val musicTagRepository: MusicTagRepository,
-    private val musicAnalysisService: MusicAnalysisService
+    private val musicAnalysisService: MusicAnalysisService,
+    private val spotifyClient: SpotifyClient
 ) {
     private val MAX_TAGS_PER_MUSIC = 30
 
@@ -70,29 +72,35 @@ class TagGenerationService(
 
         var music = musicRepository.findBySpotifyId(request.spotifyId)
 
-        // DB에 없으면 곡 정보 수집 후 신규 저장
+        // DB에 없으면 Spotify 앱 토큰으로 곡 정보 조회 후 신규 저장
         if (music == null) {
-            if (!request.title.isNullOrBlank() && !request.artist.isNullOrBlank()) {
-                println("   🆕 DB에 없는 곡 — 신규 저장 시작 (spotifyId=${request.spotifyId})")
-                try {
+            println("   🆕 DB에 없는 곡 — Spotify에서 곡 정보 조회 (spotifyId=${request.spotifyId})")
+            try {
+                val track = spotifyClient.fetchTrackByIdWithAppToken(request.spotifyId)
+                if (track != null) {
+                    val title = track.name ?: throw RuntimeException("트랙 이름 없음")
+                    val artist = track.artists.firstOrNull()?.name ?: throw RuntimeException("아티스트 없음")
+                    val album = track.album?.name
+                    val albumImageUrl = track.album?.images?.firstOrNull()?.url
+
                     val result = musicAnalysisService.fetchAndSaveMusicBySpotifyId(
                         spotifyId = request.spotifyId,
-                        title = request.title,
-                        artist = request.artist,
-                        album = request.album,
-                        albumImageUrl = request.albumImageUrl
+                        title = title,
+                        artist = artist,
+                        album = album,
+                        albumImageUrl = albumImageUrl
                     )
                     music = result.music
 
                     // AudioFeatures 기반 GPT 자동 태그 생성
                     if (result.audioFeatures != null) {
-                        autoTagByFeatures(music.id!!, request.title, request.artist, result.audioFeatures)
+                        autoTagByFeatures(music.id!!, title, artist, result.audioFeatures)
                     }
-                } catch (e: Exception) {
-                    println("   ⚠️ 신규 곡 저장 실패 (${request.spotifyId}): ${e.message} — 태그만 반환")
+                } else {
+                    println("   ⚠️ Spotify에서 트랙 정보를 가져오지 못함 — 태그만 반환")
                 }
-            } else {
-                println("   ⚠️ spotifyId=${request.spotifyId} 곡을 DB에서 찾지 못했고 title/artist 미제공 — 태그 저장 생략")
+            } catch (e: Exception) {
+                println("   ⚠️ 신규 곡 저장 실패 (${request.spotifyId}): ${e.message} — 태그만 반환")
             }
         }
 

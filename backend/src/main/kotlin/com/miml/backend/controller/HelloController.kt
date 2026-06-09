@@ -31,4 +31,20 @@ class HelloController(
             "totalMusic" to count
         )
     }
+
+    @GetMapping("/music/export")
+    fun exportMusic(): List<Map<String, Any?>> {
+        return musicRepository.findAll().map { m ->
+            mapOf(
+                "id"            to m.id,
+                "title"         to m.title,
+                "artist"        to m.artist,
+                "album"         to m.album,
+                "spotifyId"     to m.spotifyId,
+                "albumImageUrl" to m.albumImageUrl,
+                "previewUrl"    to m.previewUrl,
+                "releaseDate"   to m.releaseDate?.toString()
+            )
+        }
+    }
 }

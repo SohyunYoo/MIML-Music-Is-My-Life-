@@ -33,11 +33,13 @@ class SmartRecommendationService(
     private val POPULARITY_WEIGHT_NO_TAGS = 0.15
     private val MAX_AUDIO_DISTANCE = 80.0
     private val MIN_AUDIO_SCORE = 0.45
-    private val AUDIO_POOL_FACTOR = 4
-    private val MAX_PER_ARTIST = 2
+    private val AUDIO_POOL_FACTOR = 6       // 후보 풀 확대 → 다양한 아티스트 포함 가능성 증가
+    private val MAX_PER_ARTIST = 1          // 아티스트당 최대 1곡 (2 → 1)
     private val RANGE_MARGIN = 35
     private val TAG_POOL_LIMIT = 50
-    private val TAG_EXPAND_THRESHOLD = 0.75  // 이 유사도 이상이면 태그 풀 확장 대상
+    private val TAG_EXPAND_THRESHOLD = 0.75
+    private val SCORE_TEMPERATURE = 0.5    // 점수 평탄화: score^0.5 → 점수 차이 압축
+    private val DIVERSITY_JITTER = 0.08    // 최종 정렬 전 랜덤 노이즈 폭
 
     private val systemPrompt = """
         You are a music feature analyst. Given a natural language description of a desired music mood or situation,
@@ -48,6 +50,7 @@ class SmartRecommendationService(
         - acousticness: 0–100 (integer, 0 = fully electronic, 100 = fully acoustic)
         - tempo: 60–200 (integer, BPM)
         - tags: 2–4 tags chosen ONLY from the allowed tag list below — do NOT create new tags
+        - message: a warm, natural Korean reply (2 sentences max) that acknowledges the user's situation and briefly describes the playlist vibe. Start with "네!" or a similar friendly opener. Do NOT list song titles.
 
         CRITICAL — happiness axis:
         - happiness measures emotional POSITIVITY, not energy level.
@@ -63,6 +66,14 @@ class SmartRecommendationService(
         - genreExclude: canonical genre keys the user wants excluded ([] if not mentioned)
         If genre/country is NOT mentioned, both must be [].
 
+        CRITICAL — genre detection:
+        - "케이팝", "kpop", "k-pop", "한국 노래", "한국 음악", "국내" → ALWAYS "k-pop"
+        - "팝송", "영어 노래", "해외 노래" → "pop"
+        - "힙합", "랩", "rap" → "hip-hop"
+        - "재즈" → "jazz"
+        - "일본 노래", "j-pop", "일본 음악" → "j-pop"
+        - Genre keyword anywhere in the sentence MUST be extracted — even if buried in mood description
+
         Canonical genre keys (use ONLY these exact strings):
         ${GenreAliases.canonicalKeys.sorted().joinToString(", ")}
 
@@ -72,13 +83,17 @@ class SmartRecommendationService(
         - "케이팝 말고 다른 거" → "genreInclude": [], "genreExclude": ["k-pop", "k-indie"]
         - "힙합으로 스트레스 풀고 싶어" → "genreInclude": ["hip-hop"], "genreExclude": []
         - "꿀꿀한데 위로되는 음악 틀어줘" → "genreInclude": [], "genreExclude": []
+        - "졸라 신나는 여름에 듣는 케이팝 노래 추천해줘" → "genreInclude": ["k-pop"], "genreExclude": []
+        - "신나는 케이팝 틀어줘" → "genreInclude": ["k-pop"], "genreExclude": []
+        - "기분 좋은 팝송 틀어줘" → "genreInclude": ["pop"], "genreExclude": []
+        - "드라이브하면서 들을 신나는 힙합" → "genreInclude": ["hip-hop"], "genreExclude": []
 
         Examples:
-        - "새벽에 혼자 드라이브하며 감성에 젖고 싶어" → {"energy": 30, "happiness": 20, "danceability": 10, "acousticness": 70, "tempo": 70, "tags": ["#새벽감성", "#잔잔한", "#드라이브"]}
-        - "길 막혀서 개빡치는데 분노 분출할 노래" → {"energy": 95, "happiness": 8, "danceability": 60, "acousticness": 5, "tempo": 158, "tags": ["#폭발적인", "#강렬한", "#역동적인", "#어두운"]}
-        - "스트레스 받아서 힙합으로 풀고 싶어" → {"energy": 88, "happiness": 12, "danceability": 70, "acousticness": 5, "tempo": 145, "tags": ["#강렬한", "#폭발적인", "#역동적인"]}
-        - "친구들이랑 파티하면서 신나게 놀 노래" → {"energy": 90, "happiness": 90, "danceability": 95, "acousticness": 5, "tempo": 128, "tags": ["#신나는", "#활기찬", "#파티", "#댄스음악"]}
-        - "비 오는 날 우울하고 슬플 때" → {"energy": 25, "happiness": 10, "danceability": 15, "acousticness": 65, "tempo": 72, "tags": ["#슬픈", "#감성적인", "#비오는날", "#아련한"]}
+        - "새벽에 혼자 드라이브하며 감성에 젖고 싶어" → {"energy": 30, "happiness": 20, "danceability": 10, "acousticness": 70, "tempo": 70, "tags": ["#새벽감성", "#잔잔한", "#드라이브"], "message": "네! 새벽 드라이브의 감성에 딱 맞는 곡들을 골라봤어요. 조용하고 서정적인 음악들로 플레이리스트를 채웠어요."}
+        - "길 막혀서 개빡치는데 분노 분출할 노래" → {"energy": 95, "happiness": 8, "danceability": 60, "acousticness": 5, "tempo": 158, "tags": ["#폭발적인", "#강렬한", "#역동적인", "#어두운"], "message": "꽉 막힌 도로에서 쌓인 스트레스, 제대로 터뜨려 드릴게요! 강렬하고 폭발적인 에너지의 곡들로 준비했어요."}
+        - "스트레스 받아서 힙합으로 풀고 싶어" → {"energy": 88, "happiness": 12, "danceability": 70, "acousticness": 5, "tempo": 145, "tags": ["#강렬한", "#폭발적인", "#역동적인"], "message": "네! 스트레스 확 날려줄 강한 힙합 곡들로 준비했어요. 묵직한 비트와 강렬한 에너지로 가득한 플레이리스트예요."}
+        - "친구들이랑 파티하면서 신나게 놀 노래" → {"energy": 90, "happiness": 90, "danceability": 95, "acousticness": 5, "tempo": 128, "tags": ["#신나는", "#활기찬", "#파티", "#댄스음악"], "message": "네! 파티 분위기 확 살려줄 신나는 곡들로 채워봤어요. 모두 함께 신나게 즐길 수 있는 댄스 플레이리스트예요!"}
+        - "비 오는 날 우울하고 슬플 때" → {"energy": 25, "happiness": 10, "danceability": 15, "acousticness": 65, "tempo": 72, "tags": ["#슬픈", "#감성적인", "#비오는날", "#아련한"], "message": "네, 비 오는 날의 감성에 어울리는 곡들을 담았어요. 촉촉하고 잔잔한 멜로디로 감정에 공감해 드릴게요."}
     """.trimIndent()
 
     fun recommend(request: SmartRecommendationRequest, user: com.miml.backend.entity.User): SmartRecommendationResponse {
@@ -94,12 +109,19 @@ class SmartRecommendationService(
         val moodAcousticness = parsed.path("acousticness").asInt().coerceIn(0, 100)
         val moodTempo        = parsed.path("tempo").asInt().coerceIn(60, 200)
         val generatedTags    = parsed.path("tags").map { it.asText() }.filter { it in TagVocabulary.allowedTags }
-        val genreInclude     = parsed.path("genreInclude").map { it.asText() }.filter { it in GenreAliases.canonicalKeys }
-        val genreExclude     = parsed.path("genreExclude").map { it.asText() }.filter { it in GenreAliases.canonicalKeys }
+        val gptGenreInclude  = parsed.path("genreInclude").map { it.asText() }.filter { it in GenreAliases.canonicalKeys }
+        val gptGenreExclude  = parsed.path("genreExclude").map { it.asText() }.filter { it in GenreAliases.canonicalKeys }
+        val replyMessage     = parsed.path("message").asText("")
+
+        // GPT가 장르를 놓쳤을 경우 키워드 감지로 보완
+        val detectedInclude  = detectGenreFromInput(request.description)
+        val genreInclude     = (gptGenreInclude + detectedInclude).distinct()
+            .filter { it in GenreAliases.canonicalKeys }
+        val genreExclude     = gptGenreExclude
 
         println("   수치 → energy=$moodEnergy, happiness=$moodHappiness, danceability=$moodDanceability, acousticness=$moodAcousticness, tempo=$moodTempo")
         println("   태그 → $generatedTags")
-        println("   장르 include=$genreInclude, exclude=$genreExclude")
+        println("   장르 include=$genreInclude (gpt=$gptGenreInclude, detected=$detectedInclude), exclude=$genreExclude")
 
         // 2. 유저 프로필과 블렌딩
         val blendedEnergy       = blend(moodEnergy,       user.profileEnergy,       ratio)
@@ -191,7 +213,8 @@ class SmartRecommendationService(
             }
 
             ScoredTrack(audioTrack.music, audioTrack.audioScore, tagScore, totalScore)
-        }.sortedByDescending { it.totalScore }
+        // DIVERSITY_JITTER: 동점권 곡들의 순서를 매 요청마다 흔들어 다양성 확보
+        }.sortedByDescending { it.totalScore + Random.nextDouble(-DIVERSITY_JITTER, DIVERSITY_JITTER) }
 
         println("   최종 풀: ${pool.size}곡")
 
@@ -209,8 +232,39 @@ class SmartRecommendationService(
                 danceability = moodDanceability,
                 acousticness = moodAcousticness,
                 tempo = moodTempo
-            )
+            ),
+            message = replyMessage
         )
+    }
+
+    /**
+     * 사용자 입력에서 장르 키워드를 직접 감지 — GPT가 놓쳤을 때 보완
+     */
+    private val genreKeywordMap = mapOf(
+        "k-pop"      to listOf("케이팝", "kpop", "k-pop", "k팝", "한국 노래", "한국노래", "한국 음악", "국내 노래", "국내노래"),
+        "k-indie"    to listOf("케이인디", "한국 인디", "국내 인디"),
+        "hip-hop"    to listOf("힙합", "랩", "hip-hop", "hiphop", "hip hop"),
+        "jazz"       to listOf("재즈", "jazz"),
+        "r&b"        to listOf("알앤비", "r&b", "rnb"),
+        "j-pop"      to listOf("제이팝", "j-pop", "jpop", "일본 노래", "일본노래", "일본 음악"),
+        "pop"        to listOf("팝송", "팝 음악"),
+        "classical"  to listOf("클래식", "classical"),
+        "rock"       to listOf("록", "락", "rock", "록 음악", "락 음악", "록음악", "락음악"),
+        "electronic" to listOf("일렉트로닉", "edm", "EDM", "전자음악"),
+        "latin"      to listOf("라틴", "latin"),
+        "metal"      to listOf("메탈", "헤비메탈", "metal", "heavy metal"),
+    )
+
+    private fun detectGenreFromInput(input: String): List<String> {
+        val normalized = java.text.Normalizer.normalize(input, java.text.Normalizer.Form.NFC).lowercase()
+        return genreKeywordMap.entries
+            .filter { (_, keywords) ->
+                keywords.any { keyword ->
+                    val normalizedKeyword = java.text.Normalizer.normalize(keyword, java.text.Normalizer.Form.NFC).lowercase()
+                    normalized.contains(normalizedKeyword)
+                }
+            }
+            .map { it.key }
     }
 
     private fun applyGenreFilter(
@@ -221,8 +275,6 @@ class SmartRecommendationService(
     ): List<AudioFeatures> {
         if (genreInclude.isEmpty() && genreExclude.isEmpty()) return candidates
 
-        val candidateArtists = candidates.mapNotNull { allMusic[it.musicId]?.artist }
-
         val includedArtists: Set<String>? = if (genreInclude.isNotEmpty()) {
             artistGenreRepository.findDistinctArtistNamesByGenreIn(GenreAliases.expand(genreInclude)).toSet()
         } else null
@@ -231,18 +283,11 @@ class SmartRecommendationService(
             artistGenreRepository.findDistinctArtistNamesByGenreIn(GenreAliases.expand(genreExclude)).toSet()
         } else null
 
-        // include 필터 시, 후보 풀 내에서 장르 데이터가 아예 없는 아티스트 파악
-        val artistsWithAnyGenre: Set<String>? = if (includedArtists != null) {
-            artistGenreRepository.findDistinctArtistNamesIn(candidateArtists).toSet()
-        } else null
-
         return candidates.filter { features ->
             val artist = allMusic[features.musicId]?.artist
                 ?: return@filter excludedArtists == null
-            // 장르 일치 OR 장르 데이터 자체가 없는 아티스트 → 포함 (다양성 보장)
-            val includePass = includedArtists == null
-                || artist in includedArtists
-                || artist !in (artistsWithAnyGenre ?: emptySet())
+            // 장르 명시 시 해당 장르 아티스트만 통과 — 장르 데이터 없는 아티스트도 제외
+            val includePass = includedArtists == null || artist in includedArtists
             // 제외 장르 일치 → 제거, 장르 데이터 없으면 유지
             val excludePass = excludedArtists == null || artist !in excludedArtists
             includePass && excludePass
@@ -325,6 +370,14 @@ class SmartRecommendationService(
         }
     }
 
+    /**
+     * 가중치 샘플링 + 아티스트 중복 제거
+     *
+     * SCORE_TEMPERATURE(0.5) 적용: score^0.5 를 가중치로 사용
+     *   - 0.95^0.5 ≈ 0.975, 0.70^0.5 ≈ 0.837 → 점수 격차가 압축되어
+     *     하위권 곡도 선택될 확률이 의미 있게 높아짐
+     *   - MAX_PER_ARTIST=1 과 결합하면 특정 아티스트 독점 현상 제거
+     */
     private fun weightedSampleWithArtistDedup(pool: List<ScoredTrack>, limit: Int): List<ScoredTrack> {
         val result = mutableListOf<ScoredTrack>()
         val remaining = pool.toMutableList()
@@ -334,13 +387,15 @@ class SmartRecommendationService(
             val eligible = remaining.filter { (artistCount[it.music.artist] ?: 0) < MAX_PER_ARTIST }
             if (eligible.isEmpty()) break
 
-            val totalWeight = eligible.sumOf { it.totalScore }
+            // score^temperature 로 가중치 평탄화
+            val weights = eligible.map { it.totalScore.pow(SCORE_TEMPERATURE) }
+            val totalWeight = weights.sum()
             val rand = Random.nextDouble() * totalWeight
             var cumulative = 0.0
-            val selected = eligible.first { track ->
-                cumulative += track.totalScore
+            val selected = eligible.zip(weights).first { (_, w) ->
+                cumulative += w
                 cumulative >= rand
-            }
+            }.first
 
             result.add(selected)
             remaining.remove(selected)

@@ -1,49 +1,41 @@
-### IntelliJ IDEA ###
-.idea/
-out/
-!**/src/main/**/out/
-!**/src/test/**/out/
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
-### Kotlin ###
-.kotlin
+# dependencies
+node_modules/
 
-### Eclipse ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
-bin/
-!**/src/main/**/bin/
-!**/src/test/**/bin/
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
 
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
 
-### VS Code ###
-.vscode/
+# Metro
+.metro-health-check*
 
-### Mac OS ###
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
 .DS_Store
+*.pem
 
-### Claude Code ###
-.claude/
+# local env files
+.env*.local
 
-### Sensitive files ###
-firebase-service-account.json
-**/resources/firebase-service-account.json
+# typescript
+*.tsbuildinfo
 
-### Test & dev artifacts ###
-*.http
-*.sql
-*.iml
-
-### Env ###
-.env
-*.env
+# generated native folders
+/ios
+/android
